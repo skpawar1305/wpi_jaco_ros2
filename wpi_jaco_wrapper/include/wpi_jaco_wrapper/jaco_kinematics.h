@@ -11,9 +11,10 @@
 #ifndef JACO_ARM_KINEMATICS_H_
 #define JACO_ARM_KINEMATICS_H_
 
-#include <ros/ros.h>
-#include <wpi_jaco_msgs/JacoFK.h>
-#include <tf/tf.h>
+#include <rclcpp/rclcpp.hpp>
+#include <wpi_jaco_msgs/msg/joints.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <tf2/utils.h>
 
 //Link lengths and offsets (JACO)
 #define D1 .2755
@@ -47,7 +48,7 @@ class JacoKinematics
 
 public:
 
-  JacoKinematics(void);
+  JacoKinematics(const std::shared_ptr<rclcpp::Node> n);
 
   /**
    * \brief Callback for the forward kinematics service
@@ -55,14 +56,14 @@ public:
    * @param res service response
    * @return true on success
    */
-  bool callFK(wpi_jaco_msgs::JacoFK::Request &req, wpi_jaco_msgs::JacoFK::Response &res);
+  geometry_msgs::msg::PoseStamped callFK(const wpi_jaco_msgs::msg::Joints joints);
 
   /**
    * \brief Calculates the forward kinematics for the JACO arm
    * @param joints vector of joint angles from the arm
    * @return pose of the end effector relative to the arm's base
    */
-  geometry_msgs::PoseStamped calculateFK(std::vector<float> joints);
+  geometry_msgs::msg::PoseStamped calculateFK(std::vector<float> joints);
 
   /**
    * \brief Generates a transform given D-H parameters
@@ -72,14 +73,9 @@ public:
    * @param alpha angle offset
    * @return the transform for one link
    */
-  tf::Transform generateTransform(float theta, float d, float a, float alpha);
+  tf2::Transform generateTransform(float theta, float d, float a, float alpha);
 
 private:
-  bool loadParameters(const ros::NodeHandle n);
-
-  ros::NodeHandle n;
-  ros::ServiceServer fkServer;
-
   std::string arm_name_;
   std::string topic_prefix_;
 

@@ -2,9 +2,18 @@
 
 using namespace std;
 
-JacoKinematics::JacoKinematics(void)
+JacoKinematics::JacoKinematics(const std::shared_ptr<rclcpp::Node> n)
 {
-  loadParameters(n);
+  arm_name_ = std::string("jaco");
+  if (!n->has_parameter("wpi_jaco/arm_name"))
+      n->declare_parameter("wpi_jaco/arm_name", arm_name_);
+  n->get_parameter("wpi_jaco/arm_name", arm_name_);
+
+  // Update topic prefix
+  if (arm_name_ == "jaco2")
+      topic_prefix_ = "jaco";
+  else
+      topic_prefix_ = arm_name_;
 
   //calculate additional parameters
   double AA, CA, SA, C2A, S2A, D4B, D5B, D6B;
@@ -69,31 +78,29 @@ JacoKinematics::JacoKinematics(void)
   alphas[3] = 2 * AA;
   alphas[4] = 2 * AA;
   alphas[5] = PI;
-
-  //advertise service
-  fkServer = n.advertiseService(topic_prefix_ + "_arm/kinematics/fk", &JacoKinematics::callFK, this);
 }
 
-bool JacoKinematics::callFK(wpi_jaco_msgs::JacoFK::Request &req, wpi_jaco_msgs::JacoFK::Response &res)
+geometry_msgs::msg::PoseStamped JacoKinematics::callFK(const wpi_jaco_msgs::msg::Joints j)
 {
-  if (req.joints.size() < 6)
+  geometry_msgs::msg::PoseStamped ps;
+
+  if (j.joints.size() < 6)
   {
-    ROS_INFO("Not enough joints specified, could not calculate forward kinematics");
-    return false;
+    throw std::invalid_argument("Not enough joints specified, could not calculate forward kinematics");
   }
 
-  res.handPose = calculateFK(req.joints);
+  ps = calculateFK(j.joints);
 
-  return true;
+  return ps;
 }
 
-geometry_msgs::PoseStamped JacoKinematics::calculateFK(vector<float> joints)
+geometry_msgs::msg::PoseStamped JacoKinematics::calculateFK(vector<float> joints)
 {
-  tf::Transform transform;
-  tf::Transform tb1, t12, t23, t34, t45, t56, t6e;
-  tf::Quaternion rotQuat(0, 0, 0, 0);
-  tf::Matrix3x3 rotMat(1, 0, 0, 0, 1, 0, 0, 0, 1);
-  tf::Vector3 trans(0, 0, 0);
+  tf2::Transform transform;
+  tf2::Transform tb1, t12, t23, t34, t45, t56, t6e;
+  tf2::Quaternion rotQuat(0, 0, 0, 0);
+  tf2::Matrix3x3 rotMat(1, 0, 0, 0, 1, 0, 0, 0, 1);
+  tf2::Vector3 trans(0, 0, 0);
 
   //initialize empty transformation
   rotMat.getRotation(rotQuat);
@@ -120,7 +127,7 @@ geometry_msgs::PoseStamped JacoKinematics::calculateFK(vector<float> joints)
   }
 
   //Calculate Hand Pose
-  geometry_msgs::PoseStamped handPose;
+  geometry_msgs::msg::PoseStamped handPose;
   handPose.header.frame_id = arm_name_ + "_link_base";
   handPose.pose.position.x = transform.getOrigin().x();
   handPose.pose.position.y = transform.getOrigin().y();
@@ -133,12 +140,12 @@ geometry_msgs::PoseStamped JacoKinematics::calculateFK(vector<float> joints)
   return handPose;
 }
 
-tf::Transform JacoKinematics::generateTransform(float theta, float d, float a, float alpha)
+tf2::Transform JacoKinematics::generateTransform(float theta, float d, float a, float alpha)
 {
-  tf::Transform transform;
-  tf::Quaternion rotQuat(0, 0, 0, 0);	//Rotation quaternion
-  tf::Matrix3x3 rotMat(0, 0, 0, 0, 0, 0, 0, 0, 0);	//Rotation matrix
-  tf::Vector3 trans(0, 0, 0);	//Translation vector
+  tf2::Transform transform;
+  tf2::Quaternion rotQuat(0, 0, 0, 0);	//Rotation quaternion
+  tf2::Matrix3x3 rotMat(0, 0, 0, 0, 0, 0, 0, 0, 0);	//Rotation matrix
+  tf2::Vector3 trans(0, 0, 0);	//Translation vector
 
   //calculate rotation matrix
   rotMat.setValue(cos(theta), -sin(theta) * cos(alpha), sin(theta) * sin(alpha), sin(theta), cos(theta) * cos(alpha),
@@ -156,27 +163,3 @@ tf::Transform JacoKinematics::generateTransform(float theta, float d, float a, f
 
   return transform;
 }
-
-bool JacoKinematics::loadParameters(const ros::NodeHandle n)
-{
-    n.param("wpi_jaco/arm_name", arm_name_, std::string("jaco"));
-
-    // Update topic prefix
-    if (arm_name_ == "jaco2")
-      topic_prefix_ = "jaco";
-    else
-      topic_prefix_ = arm_name_;
-
-    //! @todo MdL [IMPR]: Return is values are all correctly loaded.
-    return true;
-}
-
-int main(int argc, char **argv)
-{
-  ros::init(argc, argv, "jaco_kinematics");
-
-  JacoKinematics jk;
-
-  ros::spin();
-}
-

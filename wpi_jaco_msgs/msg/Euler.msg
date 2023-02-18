@@ -1,0 +1,3 @@
+float32 roll                            # Rotation about x axis (rad)
+float32 pitch                           # Rotation about y axis (rad)
+float32 yaw                             # Rotation about z axis (rad)

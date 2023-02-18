@@ -1,3 +1,3 @@
-float32 finger1Vel  # velocity for thumb
-float32 finger2Vel  # velocity for top finger
-float32 finger3Vel  # velocity for bottom finger
+float32 finger1_vel  # velocity for thumb
+float32 finger2_vel  # velocity for top finger
+float32 finger3_vel  # velocity for bottom finger

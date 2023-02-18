@@ -1,45 +1,33 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.5)
 project(jaco_description)
 
-## Find catkin macros and libraries
-## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
-## is used, also find other catkin packages
-find_package(catkin REQUIRED)
+set(CMAKE_CXX_STANDARD 14)
 
-###################################################
-## Declare things to be passed to other projects ##
-###################################################
+# Default to C++14
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 14)
+endif()
 
-## LIBRARIES: libraries you create in this project that dependent projects also need
-## CATKIN_DEPENDS: catkin_packages dependent projects also need
-## DEPENDS: system dependencies of this project that dependent projects also need
-catkin_package()
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
 
-#############
-## Install ##
-#############
+find_package(ament_cmake REQUIRED)
 
-## Copy launch files
-install(DIRECTORY launch/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
-)
-
-## Install meshes
-install(DIRECTORY meshes/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/meshes
-)
+install(DIRECTORY urdf DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY meshes
+  DESTINATION share/${PROJECT_NAME}
+  #  FILES_MATCHING PATTERN "*.dae"
+ )
 
 ## Install URDF files
-install(DIRECTORY urdf/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/urdf
+install(DIRECTORY urdf
+  DESTINATION share/${PROJECT_NAME}
 )
 
 ## Install robot files
-install(DIRECTORY robots/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/robots
+install(DIRECTORY robots
+  DESTINATION share/${PROJECT_NAME}
 )
 
-## Install rviz files
-install(DIRECTORY rviz/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/rviz
-)
+ament_package()

@@ -12,26 +12,28 @@
 #ifndef JACO_ARM_TRAJECTORY_NODE_H_
 #define JACO_ARM_TRAJECTORY_NODE_H_
 
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
 
-#include <actionlib/client/simple_action_client.h>
-#include <actionlib/server/simple_action_server.h>
+#include "rclcpp_action/rclcpp_action.hpp"
 #include <boost/foreach.hpp>
 #include <boost/thread/recursive_mutex.hpp>
-#include <control_msgs/FollowJointTrajectoryAction.h>
-#include <control_msgs/GripperCommandAction.h>
+#include "control_msgs/action/follow_joint_trajectory.hpp"
+#include "control_msgs/action/gripper_command.hpp"
 #include <ecl/geometry.hpp>
-#include <wpi_jaco_msgs/AngularCommand.h>
-#include <wpi_jaco_msgs/CartesianCommand.h>
-#include <wpi_jaco_msgs/EStop.h>
-#include <wpi_jaco_msgs/GetAngularPosition.h>
-#include <wpi_jaco_msgs/GetCartesianPosition.h>
-#include <wpi_jaco_msgs/HomeArmAction.h>
-#include <wpi_jaco_msgs/JacoFK.h>
-#include <wpi_jaco_msgs/QuaternionToEuler.h>
-#include <sensor_msgs/JointState.h>
-#include <std_msgs/Bool.h>
-#include <std_srvs/Empty.h>
+#include <wpi_jaco_msgs/msg/angular_command.hpp>
+#include <wpi_jaco_msgs/msg/cartesian_command.hpp>
+#include <wpi_jaco_msgs/srv/e_stop.hpp>
+#include <wpi_jaco_msgs/srv/get_angular_position.hpp>
+#include <wpi_jaco_msgs/srv/get_cartesian_position.hpp>
+#include <wpi_jaco_msgs/action/home_arm.hpp>
+#include <wpi_jaco_msgs/srv/jaco_fk.hpp>
+#include <wpi_jaco_msgs/srv/quaternion_to_euler.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
+#include <std_msgs/msg/bool.hpp>
+#include <std_srvs/srv/empty.hpp>
+
+#include <wpi_jaco_wrapper/jaco_conversions.h>
+#include <wpi_jaco_wrapper/jaco_kinematics.h>
 
 #include <jaco_sdk/Kinova.API.UsbCommandLayerUbuntu.h>
 
@@ -58,10 +60,18 @@
 #define ANGULAR_CONTROL 1
 #define CARTESIAN_CONTROL 2
 
-#define NO_ERROR 1 //no error from Kinova API
+#define NO_KINOVA_ERROR 1 //no error from Kinova API
 
 namespace jaco
 {
+using HomeArm = wpi_jaco_msgs::action::HomeArm;
+using GoalHandleHomeArm = rclcpp_action::ServerGoalHandle<HomeArm>;
+
+using FollowJointTrajectory = control_msgs::action::FollowJointTrajectory;
+using GoalHandleFollowJointTrajectory = rclcpp_action::ServerGoalHandle<FollowJointTrajectory>;
+
+using GripperCommand = control_msgs::action::GripperCommand;
+using GoalHandleGripperCommand = rclcpp_action::ServerGoalHandle<GripperCommand>;
 
 /*!
  * \class jacoArmTrajectoryController
@@ -73,18 +83,12 @@ namespace jaco
 class JacoArmTrajectoryController
 {
 public:
-  typedef actionlib::SimpleActionServer<control_msgs::FollowJointTrajectoryAction> TrajectoryServer;
-  typedef actionlib::SimpleActionServer<control_msgs::GripperCommandAction>        GripperServer;
-  typedef actionlib::SimpleActionServer<wpi_jaco_msgs::HomeArmAction>              HomeArmServer;
-
-  typedef actionlib::SimpleActionClient<control_msgs::GripperCommandAction>        GripperClient;
-
   /**
    * \brief Constructor
    * @param nh ROS node handle
    * @param pnh ROS private node handle
    */
-  JacoArmTrajectoryController(ros::NodeHandle nh, ros::NodeHandle pnh);
+  JacoArmTrajectoryController(const std::shared_ptr<rclcpp::Node> n);
 
   /**
    * \brief Destructor
@@ -100,13 +104,13 @@ public:
    * \brief move the arm to the home position using the Kinova API home call
    * @param goal action goal
    */
-  void home_arm(const wpi_jaco_msgs::HomeArmGoalConstPtr &goal);
+  void home_arm(const std::shared_ptr<GoalHandleHomeArm> gh);
 
   /**
    * \brief Callback for the arm_controller, executes a joint angle trajectory
    * @param goal action goal
    */
-  void execute_trajectory(const control_msgs::FollowJointTrajectoryGoalConstPtr &goal);
+  void execute_trajectory(const std::shared_ptr<GoalHandleFollowJointTrajectory> gh);
 
   /**
    * \brief Callback for the smooth_arm_controller, executes a smoother Cartesian trajectory 
@@ -119,7 +123,7 @@ public:
    * on the JACO for singularity avoidance
    * @param goal action goal
    */
-  void execute_smooth_trajectory(const control_msgs::FollowJointTrajectoryGoalConstPtr &goal);
+  void execute_smooth_trajectory(const std::shared_ptr<GoalHandleFollowJointTrajectory> gh);
 
   /**
    * \brief Callback for the joint_velocity_controller, executes a smoothed trajectory with velocity control
@@ -129,33 +133,37 @@ public:
    * in this node which sends joint velocity commands to the arm.
    * @param goal action goal
    */
-  void execute_joint_trajectory(const control_msgs::FollowJointTrajectoryGoalConstPtr &goal);
+  void execute_joint_trajectory(const std::shared_ptr<GoalHandleFollowJointTrajectory> gh);
 
   /**
    * \brief Callback for the gripper_server_, executes a gripper command
    * @param goal action goal
    */
-  void execute_gripper(const control_msgs::GripperCommandGoalConstPtr &goal);
+  void execute_gripper(const std::shared_ptr<GoalHandleGripperCommand> gh);
 
   /**
    * \brief Callback for the gripper_server_radian_, executes a gripper command with a goal representing the finger position in radians
    * @param goal action goal
    */
-  void execute_gripper_radian(const control_msgs::GripperCommandGoalConstPtr &goal);
+  void execute_gripper_radian(const std::shared_ptr<GoalHandleGripperCommand> gh);
+
+  void home_arm_handle_accepted(const std::shared_ptr<GoalHandleHomeArm>gh);
+  rclcpp_action::GoalResponse home_arm_handle_goal(const rclcpp_action::GoalUUID &uuid, std::shared_ptr<const HomeArm::Goal>goal);
+  rclcpp_action::CancelResponse home_arm_handle_cancel(const std::shared_ptr<GoalHandleHomeArm>gh);
 
 private:
-  bool loadParameters(const ros::NodeHandle n);
+  bool loadParameters(const std::shared_ptr<rclcpp::Node> n);
   /**
    * \brief Callback for sending an angular command to the arm
    * @param msg angular command and info
    */
-  void angularCmdCallback(const wpi_jaco_msgs::AngularCommand& msg);
+  void angularCmdCallback(const wpi_jaco_msgs::msg::AngularCommand::SharedPtr msg);
 
   /**
    * \brief Callback for sending a Cartesian command to the arm
    * @param msg Cartesian command and info
    */
-  void cartesianCmdCallback(const wpi_jaco_msgs::CartesianCommand& msg);
+  void cartesianCmdCallback(const wpi_jaco_msgs::msg::CartesianCommand::SharedPtr msg);
 
   /**
   * \brief Control with finger velocity inputs to reach a given position
@@ -193,7 +201,10 @@ private:
    * @param res service response including joint positions
    * @return true on success
    */
-  bool getAngularPosition(wpi_jaco_msgs::GetAngularPosition::Request &req, wpi_jaco_msgs::GetAngularPosition::Response &res);
+  bool getAngularPosition(
+      const std::shared_ptr<rmw_request_id_t> request_header,
+      const std::shared_ptr<wpi_jaco_msgs::srv::GetAngularPosition::Request> req,
+      std::shared_ptr<wpi_jaco_msgs::srv::GetAngularPosition::Response> res);
 
   /**
    * \brief Service callback for getting the current Cartesian pose of the end effector
@@ -204,8 +215,10 @@ private:
    * @param res service response including the end effector pose
    * @return true on success
    */
-  bool getCartesianPosition(wpi_jaco_msgs::GetCartesianPosition::Request &req,
-                            wpi_jaco_msgs::GetCartesianPosition::Response &res);
+  bool getCartesianPosition(
+      const std::shared_ptr<rmw_request_id_t> request_header,
+      const std::shared_ptr<wpi_jaco_msgs::srv::GetCartesianPosition::Request> req,
+      std::shared_ptr<wpi_jaco_msgs::srv::GetCartesianPosition::Response> res);
 
   /**
   * \brief Callback for enabling/disabling the software emergency stop
@@ -214,7 +227,10 @@ private:
   * @param res service response
   * @return true on success
   */
-  bool eStopCallback(wpi_jaco_msgs::EStop::Request &req, wpi_jaco_msgs::EStop::Response &res);
+  bool eStopCallback(
+      const std::shared_ptr<rmw_request_id_t> request_header,
+      const std::shared_ptr<wpi_jaco_msgs::srv::EStop::Request> req,
+      std::shared_ptr<wpi_jaco_msgs::srv::EStop::Response> res);
 
   /**
   * \brief Callback for erasing trajectories currently running on the arm
@@ -222,35 +238,43 @@ private:
   * @param req empty service request
   * @param res empty service response
   */
-  bool eraseTrajectoriesCallback(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+  bool eraseTrajectoriesCallback(
+      const std::shared_ptr<rmw_request_id_t> request_header,
+      const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+      std::shared_ptr<std_srvs::srv::Empty::Response> res);
+
+  std::shared_ptr<rclcpp::Node> nh;
 
   // Messages
-  ros::Publisher joint_state_pub_; //!< publisher for joint states
-  ros::Publisher cartesianCmdPublisher; //!< publisher for Cartesian arm commands
-  ros::Publisher angularCmdPublisher; //!< publisher for angular arm commands
-  ros::Publisher armHomedPublisher; //!< publisher for when the arm completes a kinova api home arm action
-  ros::Subscriber cartesianCmdSubscriber; //!< subscriber for Cartesian arm commands
-  ros::Subscriber angularCmdSubscriber; //!< subscriber for angular arm commands
+  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_; //!< publisher for joint states
+  rclcpp::Publisher<wpi_jaco_msgs::msg::CartesianCommand>::SharedPtr cartesianCmdPublisher; //!< publisher for Cartesian arm commands
+  rclcpp::Publisher<wpi_jaco_msgs::msg::AngularCommand>::SharedPtr angularCmdPublisher; //!< publisher for angular arm commands
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr armHomedPublisher; //!< publisher for when the arm completes a kinova api home arm action
+  rclcpp::Subscription<wpi_jaco_msgs::msg::CartesianCommand>::SharedPtr cartesianCmdSubscriber; //!< subscriber for Cartesian arm commands
+  rclcpp::Subscription<wpi_jaco_msgs::msg::AngularCommand>::SharedPtr angularCmdSubscriber; //!< subscriber for angular arm commands
 
   // Services
-  ros::ServiceClient jaco_fk_client; //!< forward kinematics client
-  ros::ServiceClient qe_client; //!< quaternion to euler (XYZ) conversion client
-  ros::ServiceServer angularPositionServer; //!< service server to get the joint positions
-  ros::ServiceServer cartesianPositionServer; //!< service server to get end effector pose
-  ros::ServiceServer eStopServer; //!< service server for software estop and restart
-  ros::ServiceServer eraseTrajectoriesServer;
+  // rclcpp::Client<wpi_jaco_msgs::srv::JacoFK>::SharedPtr jaco_fk_client; //!< forward kinematics client
+  // rclcpp::Client<wpi_jaco_msgs::srv::GetAngularPosition>::SharedPtr QuaternionToEuler; //!< quaternion to euler (XYZ) conversion client
+  rclcpp::Service<wpi_jaco_msgs::srv::GetAngularPosition>::SharedPtr angularPositionServer; //!< service server to get the joint positions
+  rclcpp::Service<wpi_jaco_msgs::srv::GetCartesianPosition>::SharedPtr cartesianPositionServer; //!< service server to get end effector pose
+  rclcpp::Service<wpi_jaco_msgs::srv::EStop>::SharedPtr eStopServer; //!< service server for software estop and restart
+  rclcpp::Service<std_srvs::srv::Empty>::SharedPtr eraseTrajectoriesServer;
 
-  ros::Timer joint_state_timer_; //!< timer for joint state publisher
+  // Actions
+  rclcpp_action::Server<FollowJointTrajectory>::SharedPtr trajectory_server_; //!< point-to-point trajectory follower
+  rclcpp_action::Server<FollowJointTrajectory>::SharedPtr smooth_trajectory_server_; //!< smooth point-to-point trajectory follower based on Cartesian end effector positions
+  rclcpp_action::Server<FollowJointTrajectory>::SharedPtr smooth_joint_trajectory_server_; //!< smooth point-to-point trajectory follower based on joint velocity control
+  rclcpp_action::Server<GripperCommand>::SharedPtr gripper_server_; //!< gripper command action server (goal in Kinova API units)
+  rclcpp_action::Server<GripperCommand>::SharedPtr gripper_server_radian_; //!< gripper command action server (goal in radians)
+  rclcpp_action::Server<wpi_jaco_msgs::action::HomeArm>::SharedPtr home_arm_server_;
 
-  // Actionlib
-  TrajectoryServer*  trajectory_server_; //!< point-to-point trajectory follower
-  TrajectoryServer*  smooth_trajectory_server_; //!< smooth point-to-point trajectory follower based on Cartesian end effector positions
-  TrajectoryServer*  smooth_joint_trajectory_server_; //!< smooth point-to-point trajectory follower based on joint velocity control
-  GripperServer*     gripper_server_; //!< gripper command action server (goal in Kinova API units)
-  GripperServer*     gripper_server_radian_; //!< gripper command action server (goal in radians)
-  HomeArmServer*     home_arm_server_;
+  rclcpp_action::Client<GripperCommand>::SharedPtr gripper_client_; //!< gripper command action client, used for sending a converted goal from gripper_server_radian_ to execute on the gripper_server_
 
-  GripperClient*     gripper_client_; //!< gripper command action client, used for sending a converted goal from gripper_server_radian_ to execute on the gripper_server_
+  rclcpp::TimerBase::SharedPtr joint_state_timer_; //!< timer for joint state publisher
+
+  std::shared_ptr<JacoConversions> jc;
+  std::shared_ptr<JacoKinematics> jk;
 
   boost::recursive_mutex api_mutex;
 

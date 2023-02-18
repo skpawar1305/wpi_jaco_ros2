@@ -12,9 +12,10 @@
 #ifndef JACO_CONVERSIONS_H_
 #define JACO_CONVERSIONS_H_
 
-#include <ros/ros.h>
-#include <wpi_jaco_msgs/EulerToQuaternion.h>
-#include <wpi_jaco_msgs/QuaternionToEuler.h>
+#include <rclcpp/rclcpp.hpp>
+
+#include <geometry_msgs/msg/quaternion.hpp>
+#include <wpi_jaco_msgs/msg/euler.hpp>
 
 /*!
  * \class JacoConversions
@@ -29,31 +30,13 @@ class JacoConversions
 
 public:
 
-  JacoConversions(void);
+  JacoConversions(const std::shared_ptr<rclcpp::Node> n);
 
-  /**
-   * \brief Callback for the Euler to Quaternion service
-   * @param req service request
-   * @param res service response
-   * @return true on success
-   */
-  bool callEQ(wpi_jaco_msgs::EulerToQuaternion::Request &req, wpi_jaco_msgs::EulerToQuaternion::Response &res);
+  geometry_msgs::msg::Quaternion EulerToQuaternion(const wpi_jaco_msgs::msg::Euler e);
 
-  /**
-   * \brief Callback for the Quaternion to Euler service
-   * @param req service request
-   * @param res service response
-   * @return true on success
-   */
-  bool callQE(wpi_jaco_msgs::QuaternionToEuler::Request &req, wpi_jaco_msgs::QuaternionToEuler::Response &res);
+  wpi_jaco_msgs::msg::Euler QuaternionToEuler(const geometry_msgs::msg::Quaternion q);
 
 private:
-  bool loadParameters(const ros::NodeHandle n);
-
-  ros::NodeHandle n;
-  ros::ServiceServer eqServer;
-  ros::ServiceServer qeServer;
-
   std::string        arm_name_;
   std::string        topic_prefix_;
 };

@@ -1,3 +1,3 @@
-bool enableEStop   # true if the software emergency stop should be enabled, false otherwise
+bool enable_e_stop   # true if the software emergency stop should be enabled, false otherwise
 ---
 bool success       # true if successfully stopped or re-enabled
