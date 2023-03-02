@@ -147,9 +147,17 @@ public:
    */
   void execute_gripper_radian(const std::shared_ptr<GoalHandleGripperCommand> gh);
 
+  void joint_trajectory_handle_accepted(const std::shared_ptr<GoalHandleFollowJointTrajectory>gh);
+  rclcpp_action::GoalResponse joint_trajectory_handle_goal(const rclcpp_action::GoalUUID &uuid, std::shared_ptr<const FollowJointTrajectory::Goal>goal);
+  rclcpp_action::CancelResponse joint_trajectory_handle_cancel(const std::shared_ptr<GoalHandleFollowJointTrajectory>gh);
+
   void home_arm_handle_accepted(const std::shared_ptr<GoalHandleHomeArm>gh);
   rclcpp_action::GoalResponse home_arm_handle_goal(const rclcpp_action::GoalUUID &uuid, std::shared_ptr<const HomeArm::Goal>goal);
   rclcpp_action::CancelResponse home_arm_handle_cancel(const std::shared_ptr<GoalHandleHomeArm>gh);
+
+  void execute_gripper_handle_accepted(const std::shared_ptr<GoalHandleGripperCommand>gh);
+  rclcpp_action::GoalResponse execute_gripper_handle_goal(const rclcpp_action::GoalUUID &uuid, std::shared_ptr<const GripperCommand::Goal>goal);
+  rclcpp_action::CancelResponse execute_gripper_handle_cancel(const std::shared_ptr<GoalHandleGripperCommand>gh);
 
 private:
   bool loadParameters(const std::shared_ptr<rclcpp::Node> n);
@@ -243,6 +251,15 @@ private:
       const std::shared_ptr<std_srvs::srv::Empty::Request> req,
       std::shared_ptr<std_srvs::srv::Empty::Response> res);
 
+  /**
+   * @brief This function sets the finger positions
+   * The new finger position, combined with current joint values are constructed as a trajectory point. sendAdvancedTrajectory() is called in api to complete the motion.
+   * @param fingers in degrees from 0 to about 6800
+   * @param timeout timeout default 0.0, not used.
+   * @param push default true, errase all trajectory before request motion.
+   */
+  void setFingerPositions(const std::vector<float> &fingers, int timeout, bool push);
+
   std::shared_ptr<rclcpp::Node> nh;
 
   // Messages
@@ -291,6 +308,7 @@ private:
   double        max_speed_finger_;
   double        gripper_open_;
   double        gripper_closed_;
+  double        finger_conv_ratio_;
   int           num_fingers_;
   int           num_joints_;
   bool          kinova_gripper_;
@@ -302,6 +320,8 @@ private:
 
   unsigned int controlType; //current state of control
 
+  rclcpp::Time last_nonstall_time_;
+  std::vector<float> last_nonstall_finger_positions_;
 };
 
 }

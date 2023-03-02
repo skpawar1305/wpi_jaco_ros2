@@ -3,7 +3,7 @@
 sudo apt install ros-rolling-ecl-geometry -y # not available for 
 . /opt/ros/rolling/setup.bash
 ```
-colcon build --symlink-install --packages-select wpi_jaco_msgs jaco_description wpi_jaco_wrapper
+colcon build --symlink-install --packages-select wpi_jaco_msgs jaco_description wpi_jaco_wrapper jaco_moveit_config
 ```
 
 wpi_jaco  [![Build Status](https://api.travis-ci.org/RIVeR-Lab/wpi_jaco.png)](https://travis-ci.org/RIVeR-Lab/wpi_jaco)

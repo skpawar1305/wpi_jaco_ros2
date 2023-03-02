@@ -4,14 +4,14 @@ using namespace std;
 
 using namespace jaco;
 
-JacoArmTrajectoryController::JacoArmTrajectoryController(const std::shared_ptr<rclcpp::Node> n):
-    nh(n)
+JacoArmTrajectoryController::JacoArmTrajectoryController(const std::shared_ptr<rclcpp::Node> nh):
+  nh(nh)
 {
   arm_initialized = false;
 
   kinova_gripper_ = true;
   if (!nh->has_parameter("kinova_gripper"))
-      nh->declare_parameter("kinova_gripper", kinova_gripper_);
+    nh->declare_parameter("kinova_gripper", kinova_gripper_);
   nh->get_parameter("kinova_gripper", kinova_gripper_);
 
   loadParameters(nh);
@@ -21,7 +21,7 @@ JacoArmTrajectoryController::JacoArmTrajectoryController(const std::shared_ptr<r
 
   boost::recursive_mutex::scoped_lock lock(api_mutex);
 
-  // RCLCPP_INFO(nh->get_logger(), "Trying to initialize JACO API...");
+  RCLCPP_INFO(nh->get_logger(), "Trying to initialize JACO API...");
   while ( InitAPI() != NO_KINOVA_ERROR )
   {
     RCLCPP_ERROR(nh->get_logger(), "Could not initialize Kinova API. Is the arm connected?");
@@ -34,7 +34,7 @@ JacoArmTrajectoryController::JacoArmTrajectoryController(const std::shared_ptr<r
   StopControlAPI();
 
   // Initialize arm
-  bool home_arm = true;
+  bool home_arm = false;
   if (!nh->has_parameter("home_arm_on_init"))
       nh->declare_parameter("home_arm_on_init", home_arm);
   nh->get_parameter("home_arm_on_init", home_arm);
@@ -68,12 +68,20 @@ JacoArmTrajectoryController::JacoArmTrajectoryController(const std::shared_ptr<r
   }
   if (kinova_gripper_)
   {
+    finger_conv_ratio_ = 1.4; // for jaco v2 and all finger_conv_ratio_ = 80.0 / 6800.0;
     for (int finger_id = 0; finger_id < num_fingers_; ++finger_id)
     {
       stringstream finger_name_stream;
       finger_name_stream << arm_name_ << "_joint_finger_" << (finger_id + 1);
       string finger_name = finger_name_stream.str();
       joint_names.push_back(finger_name);
+    }
+    for (int finger_id = 0; finger_id < num_fingers_; ++finger_id)
+    {
+      stringstream finger_tip_name_stream;
+      finger_tip_name_stream << arm_name_ << "_joint_finger_tip_" << (finger_id + 1);
+      string finger_tip_name = finger_tip_name_stream.str();
+      joint_names.push_back(finger_tip_name);
     }
   }
 
@@ -86,7 +94,7 @@ JacoArmTrajectoryController::JacoArmTrajectoryController(const std::shared_ptr<r
   joint_state_pub_ = nh->create_publisher<sensor_msgs::msg::JointState>(topic_prefix_ + "_arm/joint_states", 1);
   cartesianCmdPublisher = nh->create_publisher<wpi_jaco_msgs::msg::CartesianCommand>(topic_prefix_+"_arm/cartesian_cmd", 1);
   angularCmdPublisher = nh->create_publisher<wpi_jaco_msgs::msg::AngularCommand>(topic_prefix_+"_arm/angular_cmd", 1);
-  update_joint_states();
+  // update_joint_states();
   armHomedPublisher = nh->create_publisher<std_msgs::msg::Bool>(topic_prefix_ + "_arm/arm_homed", 1);
 
   cartesianCmdSubscriber = nh->create_subscription<wpi_jaco_msgs::msg::CartesianCommand>(topic_prefix_+"_arm/cartesian_cmd", 1,
@@ -106,7 +114,15 @@ JacoArmTrajectoryController::JacoArmTrajectoryController(const std::shared_ptr<r
 
   // Create actionlib servers and clients
   // trajectory_server_              = new TrajectoryServer( nh, topic_prefix_ + "_arm/arm_controller/trajectory", boost::bind(&JacoArmTrajectoryController::execute_trajectory, this, _1), true);
+
   // smooth_joint_trajectory_server_ = new TrajectoryServer( nh, topic_prefix_ + "_arm/joint_velocity_controller/trajectory", boost::bind(&JacoArmTrajectoryController::execute_joint_trajectory, this, _1), true);
+  smooth_joint_trajectory_server_ = rclcpp_action::create_server<FollowJointTrajectory>(
+      nh,
+      topic_prefix_ + "_arm/joint_velocity_controller/trajectory",
+      std::bind(&JacoArmTrajectoryController::joint_trajectory_handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+      std::bind(&JacoArmTrajectoryController::joint_trajectory_handle_cancel, this, std::placeholders::_1),
+      std::bind(&JacoArmTrajectoryController::joint_trajectory_handle_accepted, this, std::placeholders::_1));
+
   // smooth_trajectory_server_       = new TrajectoryServer( nh, topic_prefix_ + "_arm/smooth_arm_controller/trajectory", boost::bind(&JacoArmTrajectoryController::execute_smooth_trajectory, this, _1), false);
   home_arm_server_ = rclcpp_action::create_server<HomeArm>(
       nh,
@@ -115,11 +131,17 @@ JacoArmTrajectoryController::JacoArmTrajectoryController(const std::shared_ptr<r
       std::bind(&JacoArmTrajectoryController::home_arm_handle_cancel, this, std::placeholders::_1),
       std::bind(&JacoArmTrajectoryController::home_arm_handle_accepted, this, std::placeholders::_1));
 
-  // if (kinova_gripper_)
-  // {
-  //   gripper_server_                 = new GripperServer( nh, topic_prefix_ + "_arm/fingers_controller/gripper", boost::bind(&JacoArmTrajectoryController::execute_gripper, this, _1), false);
+  if (kinova_gripper_)
+  {
+    gripper_server_ = rclcpp_action::create_server<GripperCommand>(
+      nh,
+      topic_prefix_ + "_arm/fingers_controller/gripper",
+      std::bind(&JacoArmTrajectoryController::execute_gripper_handle_goal, this, std::placeholders::_1, std::placeholders::_2),
+      std::bind(&JacoArmTrajectoryController::execute_gripper_handle_cancel, this, std::placeholders::_1),
+      std::bind(&JacoArmTrajectoryController::execute_gripper_handle_accepted, this, std::placeholders::_1));
+    
   //   gripper_server_radian_          = new GripperServer( nh, topic_prefix_ + "_arm/fingers_controller_radian/gripper", boost::bind(&JacoArmTrajectoryController::execute_gripper_radian, this, _1), false);
-  // }
+  }
 
   joint_state_timer_ = nh->create_wall_timer(std::chrono::milliseconds(33),
                                       std::bind(&JacoArmTrajectoryController::update_joint_states, this));
@@ -172,6 +194,9 @@ void JacoArmTrajectoryController::update_joint_states()
       joint_eff_[6] = force_data.Fingers.Finger1;
       joint_eff_[7] = force_data.Fingers.Finger2;
       joint_eff_[8] = force_data.Fingers.Finger3;
+      for (int i = 9; i<12; i++) {
+        joint_eff_[i] = 0;
+      }
     }
 
     AngularPosition velocity_data;
@@ -184,10 +209,10 @@ void JacoArmTrajectoryController::update_joint_states()
     joint_vel_[5] = velocity_data.Actuators.Actuator6 * DEG_TO_RAD;
     if (kinova_gripper_)
     {
-      //NOTE: the finger units are arbitrary, but converting them as if they were in degrees provides an approximately correct visualization
-      joint_vel_[6] = velocity_data.Fingers.Finger1 * DEG_TO_RAD * finger_scale_;
-      joint_vel_[7] = velocity_data.Fingers.Finger2 * DEG_TO_RAD * finger_scale_;
-      joint_vel_[8] = velocity_data.Fingers.Finger3 * DEG_TO_RAD * finger_scale_;
+      // no velocity info for fingers
+      for (int i = 6; i<12; i++) {
+        joint_vel_[i] = 0;
+      }
     }
 
     AngularPosition position_data;
@@ -200,10 +225,20 @@ void JacoArmTrajectoryController::update_joint_states()
     joint_pos_[5] = simplify_angle(position_data.Actuators.Actuator6 * DEG_TO_RAD);
     if (kinova_gripper_)
     {
-      joint_pos_[6] = position_data.Fingers.Finger1 * DEG_TO_RAD * finger_scale_;
-      joint_pos_[7] = position_data.Fingers.Finger2 * DEG_TO_RAD * finger_scale_;
-      joint_pos_[8] = position_data.Fingers.Finger3 * DEG_TO_RAD * finger_scale_;
+      // This logic is in kinova-ros package
+      CartesianPosition cartesian_position;
+      {
+        boost::recursive_mutex::scoped_lock lock(api_mutex);
+        GetCartesianPosition(cartesian_position);
+      }
+      joint_pos_[6] = cartesian_position.Fingers.Finger1 * DEG_TO_RAD * finger_scale_;
+      joint_pos_[7] = cartesian_position.Fingers.Finger2 * DEG_TO_RAD * finger_scale_;
+      joint_pos_[8] = cartesian_position.Fingers.Finger3 * DEG_TO_RAD * finger_scale_;
+      for (int i = 9; i<12; i++) {
+        joint_pos_[i] = 0;
+      }
     }
+
   }
 
   sensor_msgs::msg::JointState state;
@@ -267,7 +302,7 @@ void JacoArmTrajectoryController::execute_trajectory(const std::shared_ptr<GoalH
     EraseAllTrajectories();
   }
 
-  update_joint_states();
+  // update_joint_states();
   double current_joint_pos[NUM_JACO_JOINTS];
 
   AngularPosition position_data;
@@ -388,6 +423,29 @@ void JacoArmTrajectoryController::execute_trajectory(const std::shared_ptr<GoalH
 /*****  Smoothed Trajectory Control ******/
 /*****************************************/
 
+void JacoArmTrajectoryController::joint_trajectory_handle_accepted(const std::shared_ptr<GoalHandleFollowJointTrajectory>gh)
+{
+  std::thread
+  {
+    // std::bind(&JacoArmTrajectoryController::execute_smooth_trajectory, this, std::placeholders::_1), gh
+    std::bind(&JacoArmTrajectoryController::execute_joint_trajectory, this, std::placeholders::_1), gh
+    // std::bind(&JacoArmTrajectoryController::execute_trajectory, this, std::placeholders::_1), gh
+  }.detach();
+}
+
+rclcpp_action::GoalResponse JacoArmTrajectoryController::joint_trajectory_handle_goal(const rclcpp_action::GoalUUID &uuid, std::shared_ptr<const FollowJointTrajectory::Goal>goal)
+{
+  (void)uuid;
+  return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+}
+
+rclcpp_action::CancelResponse JacoArmTrajectoryController::joint_trajectory_handle_cancel(const std::shared_ptr<GoalHandleFollowJointTrajectory>gh)
+{
+  RCLCPP_INFO(nh->get_logger(), "Received request to cancel goal");
+  (void)gh;
+  return rclcpp_action::CancelResponse::ACCEPT;
+}
+
 void JacoArmTrajectoryController::execute_smooth_trajectory(const std::shared_ptr<GoalHandleFollowJointTrajectory> gh)
 {
   const auto goal = gh->get_goal();
@@ -405,7 +463,7 @@ void JacoArmTrajectoryController::execute_smooth_trajectory(const std::shared_pt
     EraseAllTrajectories();
   }
 
-  update_joint_states();
+  // update_joint_states();
   double current_joint_pos[NUM_JACO_JOINTS];
 
   AngularPosition position_data;
@@ -456,45 +514,25 @@ void JacoArmTrajectoryController::execute_smooth_trajectory(const std::shared_pt
     {
       auto fk = jk->callFK(arm_joints);
       //conversion to rpy
-      try
-      {
-        auto euler_angles = jc->QuaternionToEuler(fk.pose.orientation);
 
-        trajPoint.Position.CartesianPosition.X = fk.pose.position.x;
-        trajPoint.Position.CartesianPosition.Y = fk.pose.position.y;
-        trajPoint.Position.CartesianPosition.Z = fk.pose.position.z;
-        trajPoint.Position.CartesianPosition.ThetaX = euler_angles.roll;
-        trajPoint.Position.CartesianPosition.ThetaY = euler_angles.pitch;
-        trajPoint.Position.CartesianPosition.ThetaZ = euler_angles.yaw;
+      auto euler_angles = jc->QuaternionToEuler(fk.pose.orientation);
 
-        // for debugging:
-        RCLCPP_INFO(nh->get_logger(), "Trajectory point: (%f, %f, %f); (%f, %f, %f)", trajPoint.Position.CartesianPosition.X, trajPoint.Position.CartesianPosition.Y, trajPoint.Position.CartesianPosition.Z, trajPoint.Position.CartesianPosition.ThetaX, trajPoint.Position.CartesianPosition.ThetaY, trajPoint.Position.CartesianPosition.ThetaZ);
+      trajPoint.Position.CartesianPosition.X = fk.pose.position.x;
+      trajPoint.Position.CartesianPosition.Y = fk.pose.position.y;
+      trajPoint.Position.CartesianPosition.Z = fk.pose.position.z;
+      trajPoint.Position.CartesianPosition.ThetaX = euler_angles.roll;
+      trajPoint.Position.CartesianPosition.ThetaY = euler_angles.pitch;
+      trajPoint.Position.CartesianPosition.ThetaZ = euler_angles.yaw;
 
-        //send point to arm trajectory
-        executeCartesianTrajectoryPoint(trajPoint, false);
-      }
-      catch (std::exception& e)
-      {
-        RCLCPP_INFO(nh->get_logger(), "Quaternion to Euler Angle conversion failed: ", e.what());
+      // for debugging:
+      RCLCPP_INFO(nh->get_logger(), "Trajectory point: (%f, %f, %f); (%f, %f, %f)", trajPoint.Position.CartesianPosition.X, trajPoint.Position.CartesianPosition.Y, trajPoint.Position.CartesianPosition.Z, trajPoint.Position.CartesianPosition.ThetaX, trajPoint.Position.CartesianPosition.ThetaY, trajPoint.Position.CartesianPosition.ThetaZ);
 
-        trajPoint.Position.Type = ANGULAR_VELOCITY;
-        trajPoint.Position.Actuators.Actuator1 = 0.0;
-        trajPoint.Position.Actuators.Actuator2 = 0.0;
-        trajPoint.Position.Actuators.Actuator3 = 0.0;
-        trajPoint.Position.Actuators.Actuator4 = 0.0;
-        trajPoint.Position.Actuators.Actuator5 = 0.0;
-        trajPoint.Position.Actuators.Actuator6 = 0.0;
-        executeAngularTrajectoryPoint(trajPoint, true);
-
-        auto result = std::make_shared<FollowJointTrajectory::Result>();
-        result->error_code = control_msgs::action::FollowJointTrajectory_Result::INVALID_JOINTS;
-        gh->succeed(result);
-        return;
-      }
+      //send point to arm trajectory
+      executeCartesianTrajectoryPoint(trajPoint, false);
     }
     catch (std::exception& e)
     {
-      RCLCPP_INFO(nh->get_logger(), "Failed to call forward kinematics: ", e.what());
+      RCLCPP_INFO(nh->get_logger(), "Quaternion to Euler Angle conversion failed: ", e.what());
 
       trajPoint.Position.Type = ANGULAR_VELOCITY;
       trajPoint.Position.Actuators.Actuator1 = 0.0;
@@ -804,9 +842,111 @@ void JacoArmTrajectoryController::execute_joint_trajectory(const std::shared_ptr
 /***********  Gripper Control ************/
 /*****************************************/
 
+void JacoArmTrajectoryController::execute_gripper_handle_accepted(const std::shared_ptr<GoalHandleGripperCommand>gh)
+{
+  std::thread
+  {
+    std::bind(&JacoArmTrajectoryController::execute_gripper, this, std::placeholders::_1), gh
+  }.detach();
+}
+
+rclcpp_action::GoalResponse JacoArmTrajectoryController::execute_gripper_handle_goal(const rclcpp_action::GoalUUID &uuid, std::shared_ptr<const GripperCommand::Goal>goal)
+{
+  (void)uuid;
+  return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+}
+
+rclcpp_action::CancelResponse JacoArmTrajectoryController::execute_gripper_handle_cancel(const std::shared_ptr<GoalHandleGripperCommand>gh)
+{
+  RCLCPP_INFO(nh->get_logger(), "Received request to cancel goal");
+  (void)gh;
+  return rclcpp_action::CancelResponse::ACCEPT;
+}
+
+void JacoArmTrajectoryController::setFingerPositions(const std::vector<float> &fingers, int timeout, bool push)
+{
+    boost::recursive_mutex::scoped_lock lock(api_mutex);
+
+    if (eStopEnabled)
+    {
+        RCLCPP_INFO(rclcpp::get_logger("kinova_comm"), "The fingers could not be set because the arm is stopped");
+        return;
+    }
+
+    int result = NO_KINOVA_ERROR;
+    int control_type;
+    result=GetControlType(control_type); // are we currently in angular or Cartesian mode? Response	0 = Cartesian control type, 1 = Angular control type.
+
+    //initialize the trajectory point. same initialization for an angular or Cartesian point
+    TrajectoryPoint kinova_point;
+
+    if (result != NO_KINOVA_ERROR)
+    {
+        throw std::runtime_error("Could not get the current control type");
+    }
+    else
+    {
+	if (push)
+    	{
+        	result = EraseAllTrajectories();
+        	if (result != NO_KINOVA_ERROR)
+        	{
+           		throw std::runtime_error("Could not erase trajectories");
+        	}
+    	}
+	// Initialize Cartesian control of the fingers
+	kinova_point.Position.HandMode = POSITION_MODE;
+	kinova_point.Position.Fingers.Finger1 = 50;//fingers[0];
+	kinova_point.Position.Fingers.Finger2 = 50;//fingers[1];
+	kinova_point.Position.Fingers.Finger3 = 50;//fingers[2];
+	kinova_point.Position.Delay = 0.0;
+	kinova_point.LimitationsActive = 0;
+	if(control_type==0) //Cartesian
+	{
+		kinova_point.Position.Type = CARTESIAN_POSITION;
+		CartesianPosition pose;
+                memset(&pose, 0, sizeof(pose));  // zero structure
+		result = GetCartesianCommand(pose);
+    		if (result != NO_KINOVA_ERROR)
+    		{
+        		throw std::runtime_error("Could not get the Cartesian position");
+    		}
+		kinova_point.Position.CartesianPosition=pose.Coordinates;
+	}
+        else if(control_type==1) //angular
+	{
+		kinova_point.Position.Type = ANGULAR_POSITION;
+		AngularPosition joint_angles;
+    		memset(&joint_angles, 0, sizeof(joint_angles));  // zero structure
+		result = GetAngularCommand(joint_angles);
+    		if (result != NO_KINOVA_ERROR)
+    		{
+        		throw std::runtime_error("Could not get the angular position");
+    		}
+		kinova_point.Position.Actuators = joint_angles.Actuators;
+	}
+	else
+	{
+		throw std::runtime_error("Wrong control type");
+	}
+    }
+
+
+    // getAngularPosition will cause arm drop
+    // result = kinova_api_.getAngularPosition(joint_angles);
+
+    result = SendBasicTrajectory(kinova_point);
+    if (result != NO_KINOVA_ERROR)
+    {
+        throw std::runtime_error("Could not send advanced finger trajectory");
+    }
+}
+
 void JacoArmTrajectoryController::execute_gripper(const std::shared_ptr<GoalHandleGripperCommand> gh)
 {
   const auto goal = gh->get_goal();
+  RCLCPP_INFO_STREAM(nh->get_logger(), "Gripper goal: " << goal->command.position * RAD_TO_DEG);
+
   //check for cancel
   if (eStopEnabled)
   {
@@ -815,100 +955,97 @@ void JacoArmTrajectoryController::execute_gripper(const std::shared_ptr<GoalHand
     gh->succeed(result);
     return;
   }
-  wpi_jaco_msgs::msg::AngularCommand cmd;
-  cmd.position = true;
-  cmd.arm_command = false;
-  cmd.finger_command = true;
-  cmd.repeat = false;
-  cmd.fingers.resize(num_fingers_);
-  for (int i = 0 ; i < num_fingers_ ; i++)
-    cmd.fingers[i] = goal->command.position;
 
-  angularCmdPublisher->publish(cmd);
+  // auto feedback = std::make_shared<SetFingersPosition::Feedback>();
+  // auto result = std::make_shared<SetFingersPosition::Result>();
+  std::vector<float> current_finger_positions;
+  rclcpp::Time current_time = nh->get_clock()->now();
 
-  //give the fingers sufficient time to start moving, this prevents early termination if a command is slow to reach arm
-  rclcpp::Rate startupRate(1);
-  startupRate.sleep();
-
-  rclcpp::Rate rate(10);
-  bool gripperMoving = true;
-  while (gripperMoving)
+  try
   {
-    //check for cancel
-    if (eStopEnabled)
-    {
+      CartesianPosition cartesian_position;
+      {
+        boost::recursive_mutex::scoped_lock lock(api_mutex);
+        GetCartesianPosition(cartesian_position);
+      }
+      current_finger_positions = {cartesian_position.Fingers.Finger1,cartesian_position.Fingers.Finger2,cartesian_position.Fingers.Finger3};
+
+      last_nonstall_time_ = current_time;
+      last_nonstall_finger_positions_ = current_finger_positions;
+
+      std::vector<float> target;
+      for (int i=0; i<3; i++)
+        target.push_back(goal->command.position * RAD_TO_DEG);
+
+      RCLCPP_INFO_STREAM(nh->get_logger(), "setting finger angles to: " << target[0] << "," << target[1] << "," << target[2]);
+      setFingerPositions(target, 0, false);
+
       auto result = std::make_shared<GripperCommand::Result>();
-      result->reached_goal = false;
-      gh->succeed(result);
-      return;
-    }
 
-    rate.sleep();
-    //check for preempt requests from clients
-    if (gh->is_canceling() || !rclcpp::ok())
-    {
-      //stop gripper control
-      cmd.position = false;
-      for (int i = 0 ; i < num_fingers_ ; i++)
-        cmd.fingers[i] = 0.0;
+      // Loop until the action completed, is preempted, or fails in some way.
+      // timeout is left to the caller since the timeout may greatly depend on
+      // the context of the movement.
+      while (rclcpp::ok())
+      {
+          if (eStopEnabled)
+          {
+            result->reached_goal = false;
+            gh->succeed(result);
+            return;
+          }
+          else if (gh->is_canceling() || !rclcpp::ok())
+          {
+              // result->fingers = current_finger_positions.constructFingersMsg();
+              gh->canceled(result);
+              RCLCPP_DEBUG_STREAM(nh->get_logger(), __PRETTY_FUNCTION__ << ": LINE " << __LINE__ << ", setPreempted ");
+              return;
+          }
 
-      angularCmdPublisher->publish(cmd);
+          CartesianPosition cartesian_position;
+          {
+            boost::recursive_mutex::scoped_lock lock(api_mutex);
+            GetCartesianPosition(cartesian_position);
+          }
 
-      //preempt action server
-      RCLCPP_INFO(nh->get_logger(), "Gripper action server preempted by client");
+          current_finger_positions = {cartesian_position.Fingers.Finger1, cartesian_position.Fingers.Finger2, cartesian_position.Fingers.Finger3};
+
+          current_time = nh->get_clock()->now();
+          // feedback->fingers = current_finger_positions.constructFingersMsg();
+
+          double tolerance = 6400.0*0.01;
+          // ToDo:
+          // if (target.isCloseToOther(current_finger_positions, tolerance))
+          // {
+          //     // Check if the action has succeeeded
+          //     // result->fingers = current_finger_positions.constructFingersMsg();
+          //     gh->succeed(result);
+          //     RCLCPP_DEBUG_STREAM(nh->get_logger(), __PRETTY_FUNCTION__ << ": LINE " << __LINE__ << ", setSucceeded ");
+          //     return;
+          // }
+          // else if (!last_nonstall_finger_positions_.isCloseToOther(current_finger_positions, stall_threshold_))
+          // {
+          //     // Check if we are outside of a potential stall condition
+          //     last_nonstall_time_ = current_time;
+          //     last_nonstall_finger_positions_ = current_finger_positions;
+          // }
+          // else if ((current_time.seconds() - last_nonstall_time_.seconds()) > stall_interval_seconds_)
+          // {
+          //     gh->abort(result);
+          //     RCLCPP_DEBUG_STREAM(nh->get_logger(), __PRETTY_FUNCTION__ << ": LINE " << __LINE__ << ", Trajectory command failed ");
+          //     return;
+          // }
+
+          rclcpp::Rate(10).sleep();
+      }
+  }
+  catch(const std::exception& e)
+  {
+      // result->fingers = current_finger_positions.constructFingersMsg();
+      RCLCPP_ERROR_STREAM(nh->get_logger(), e.what());
       auto result = std::make_shared<GripperCommand::Result>();
-      gh->canceled(result);
-
-      return;
-    }
-
-    //see if fingers are still moving
-    AngularPosition velocity_data;
-    {
-      boost::recursive_mutex::scoped_lock lock(api_mutex);
-      GetAngularVelocity(velocity_data);
-    }
-
-    float totalSpeed = fabs(velocity_data.Fingers.Finger1) 
-                     + fabs(velocity_data.Fingers.Finger2);
-    if ( num_fingers_ == 3 )
-      totalSpeed += fabs(velocity_data.Fingers.Finger3);
-
-    if (totalSpeed <= 0.01)
-      gripperMoving = false;
+      gh->abort(result);
+      RCLCPP_DEBUG_STREAM(nh->get_logger(), __PRETTY_FUNCTION__ << ": LINE " << __LINE__ << ", setAborted ");
   }
-
-  //stop gripper control
-  {
-    boost::recursive_mutex::scoped_lock lock(api_mutex);
-    EraseAllTrajectories();
-  }
-
-  cmd.position = false;
-  for (int i = 0 ; i < num_fingers_ ; i++)
-    cmd.fingers[i] = 0.0;
-
-  angularCmdPublisher->publish(cmd);
-
-  auto result = std::make_shared<GripperCommand::Result>();
-  AngularPosition force_data;
-  AngularPosition position_data;
-  {
-    boost::recursive_mutex::scoped_lock lock(api_mutex);
-    GetAngularPosition(position_data);
-    GetAngularForce(force_data);
-  }
-  float finalError    = fabs(goal->command.position - position_data.Fingers.Finger1) 
-                      + fabs(goal->command.position - position_data.Fingers.Finger2);
-  if ( num_fingers_ == 3 )
-    finalError += fabs(goal->command.position - position_data.Fingers.Finger3);
-
-  RCLCPP_INFO(nh->get_logger(), "Final error: %f", finalError);
-  result->reached_goal = (finalError <= finger_error_threshold_);
-  result->position     = position_data.Fingers.Finger1;
-  result->effort       = force_data.Fingers.Finger1;
-  result->stalled      = false;
-  gh->succeed(result);
 }
 
 void JacoArmTrajectoryController::execute_gripper_radian(const std::shared_ptr<GoalHandleGripperCommand> gh)
@@ -983,6 +1120,7 @@ void JacoArmTrajectoryController::execute_gripper_radian(const std::shared_ptr<G
 
     if (totalSpeed <= 0.01)
       gripperMoving = false;
+
   }
 
   //stop gripper control
@@ -1199,7 +1337,7 @@ bool JacoArmTrajectoryController::loadParameters(const std::shared_ptr<rclcpp::N
 
     // Update total number of joints
     if (kinova_gripper_)
-      num_joints_ = num_fingers_ + NUM_JACO_JOINTS;
+      num_joints_ = 2*num_fingers_ + NUM_JACO_JOINTS;
     else
       num_joints_ = NUM_JACO_JOINTS;
 
@@ -1536,7 +1674,7 @@ void JacoArmTrajectoryController::fingerPositionControl(float f1, float f2, floa
     rate.sleep();
   }
 
-  //RCLCPP_INFO(nh->get_logger(), "Goal reached, counter: %d, total error: %f", counter, prevTotalError);
+  RCLCPP_INFO(nh->get_logger(), "Goal reached, counter: %d, total error: %f", counter, prevTotalError);
 }
 
 void JacoArmTrajectoryController::executeAngularTrajectoryPoint(TrajectoryPoint point, bool erase)
@@ -1677,6 +1815,12 @@ int main(int argc, char** argv)
   std::shared_ptr<rclcpp::Node> node = std::make_shared<rclcpp::Node>("jaco_arm_trajectory_node");
 
   jaco::JacoArmTrajectoryController robot(node);
-  rclcpp::spin(node);
+
+  while (rclcpp::ok())
+  {
+    rclcpp::spin_some(node);
+  }
+
   rclcpp::shutdown();
+  return 0;
 }

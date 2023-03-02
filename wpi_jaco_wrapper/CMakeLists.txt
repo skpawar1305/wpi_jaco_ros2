@@ -103,15 +103,15 @@ target_link_libraries(jaco_arm_trajectory_node
 #   FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
 # )
 
-# ## Copy launch files
-# install(DIRECTORY launch/
-#   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
-# )
+## Copy launch files
+install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
+)
 
-# ## Copy config files
-# install(DIRECTORY config/
-#   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/config
-# )
+## Copy config files
+install(DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
+)
 
 ## LIBRARIES: libraries you create in this project that dependent projects also need
 install(FILES

@@ -1,5 +1,5 @@
-<package>
-
+<?xml version="1.0"?>
+<package format="3">
   <name>jaco_moveit_config</name>
   <version>0.0.25</version>
   <description>
@@ -17,15 +17,16 @@
   <url type="bugtracker">https://github.com/RIVeR-Lab/wpi_jaco/issues</url>
   <url type="repository">https://github.com/RIVeR-Lab/wpi_jaco</url>
 
-  <run_depend>moveit_ros_move_group</run_depend>
-  <run_depend>moveit_planners_ompl</run_depend>
-  <run_depend>joint_state_publisher</run_depend>
-  <run_depend>robot_state_publisher</run_depend>
-  <run_depend>xacro</run_depend>
-  <build_depend>jaco_description</build_depend>
-  <run_depend>jaco_description</run_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <depend>moveit_ros_move_group</depend>
+  <depend>moveit_planners_ompl</depend>
+  <depend>joint_state_publisher</depend>
+  <depend>robot_state_publisher</depend>
+  <depend>xacro</depend>
+  <depend>jaco_description</depend>
 
-  <buildtool_depend>catkin</buildtool_depend>
-  
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
 </package>
