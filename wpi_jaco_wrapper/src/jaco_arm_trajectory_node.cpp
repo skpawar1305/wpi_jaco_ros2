@@ -34,7 +34,7 @@ JacoArmTrajectoryController::JacoArmTrajectoryController(const std::shared_ptr<r
   StopControlAPI();
 
   // Initialize arm
-  bool home_arm = false;
+  bool home_arm = true;
   if (!nh->has_parameter("home_arm_on_init"))
       nh->declare_parameter("home_arm_on_init", home_arm);
   nh->get_parameter("home_arm_on_init", home_arm);

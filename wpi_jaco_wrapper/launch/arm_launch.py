@@ -42,18 +42,18 @@ def launch_setup(context, *args, **kwargs):
         output='screen',
     )
     
-    xacro_file = os.path.join(get_package_share_directory(robot_type + '_description'), 'robots', 'standalone_arm.urdf.xacro')
-    doc = xacro.process_file(xacro_file)
-    robot_desc = doc.toprettyxml(indent='  ')
-    robot_state_publisher = Node(
-        package='robot_state_publisher',
-        executable='robot_state_publisher',
-        remappings=[('joint_states', '/jaco_arm/joint_states')],
-        output='screen',
-        parameters=[{'robot_description': robot_desc},],
-    )
+    # xacro_file = os.path.join(get_package_share_directory(robot_type + '_description'), 'robots', 'standalone_arm.urdf.xacro')
+    # doc = xacro.process_file(xacro_file)
+    # robot_desc = doc.toprettyxml(indent='  ')
+    # robot_state_publisher = Node(
+    #     package='robot_state_publisher',
+    #     executable='robot_state_publisher',
+    #     remappings=[('joint_states', '/jaco_arm/joint_states')],
+    #     output='screen',
+    #     parameters=[{'robot_description': robot_desc},],
+    # )
     
-    return [wpi_jaco_wrapper, robot_state_publisher]
+    return [wpi_jaco_wrapper]#, robot_state_publisher]
 
 def generate_launch_description():
     return LaunchDescription(declare_configurable_parameters(configurable_parameters) + [
